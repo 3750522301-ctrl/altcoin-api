@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>币安永续山寨币监控</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: linear-gradient(135deg, #07111a 0%, #0f1729 100%);
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      padding: 20px;
+    }
+    .container { max-width: 1500px; margin: 0 auto; }
+    h1 {
+      text-align: center;
+      color: #06b6d4;
+      margin-bottom: 20px;
+      font-size: 32px;
+    }
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      gap: 15px;
+      flex-wrap: wrap;
+    }
+    .time-info { color: #94a3b8; font-size: 13px; }
+    button {
+      background: #0891b2;
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    button:hover { background: #0e7490; }
+    .topbar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: rgba(15,23,41,0.85);
+      border: 1px solid rgba(34,211,238,0.2);
+      border-radius: 12px;
+      padding: 16px;
+      backdrop-filter: blur(10px);
+    }
+    .label { color: #94a3b8; font-size: 12px; margin-bottom: 8px; }
+    .value { color: #06b6d4; font-size: 24px; font-weight: bold; }
+    .table-wrap {
+      overflow: auto;
+      background: rgba(15,23,41,0.85);
+      border: 1px solid rgba(34,211,238,0.2);
+      border-radius: 16px;
+      backdrop-filter: blur(10px);
+      max-height: 800px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(148,163,184,0.15);
+      text-align: left;
+      white-space: nowrap;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: rgba(15,23,41,0.95);
+      color: #cbd5e1;
+      font-weight: 600;
+      z-index: 10;
+    }
+    tbody tr {
+      transition: background 0.2s;
+    }
+    tbody tr:hover { background: rgba(30,41,59,0.55); }
+    .symbol { color: #06b6d4; font-weight: bold; }
+    .green { color: #22c55e; }
+    .red { color: #ef4444; }
+    .gray { color: #94a3b8; }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(34,211,238,0.15);
+      color: #06b6d4;
+      font-size: 11px;
+      margin-right: 4px;
+      white-space: nowrap;
+    }
+    .status {
+      text-align: center;
+      padding: 40px;
+      color: #94a3b8;
+    }
+    .error {
+      color: #ef4444;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⚡ 币安永续山寨币监控</h1>
+
+    <div class="toolbar">
+      <div class="time-info" id="last-update">最后更新：-</div>
+      <button onclick="loadData()">手动刷新</button>
+    </div>
+
+    <div class="topbar">
+      <div class="card">
+        <div class="label">监控币种数</div>
+        <div class="value" id="stat-total">-</div>
+      </div>
+      <div class="card">
+        <div class="label">高换手(Vol/Mcap>20%)</div>
+        <div class="value" id="stat-vol">-</div>
+      </div>
+      <div class="card">
+        <div class="label">多头拥挤(Funding>0.04%)</div>
+        <div class="value" id="stat-long">-</div>
+      </div>
+      <div class="card">
+        <div class="label">空头拥挤(Funding<-0.04%)</div>
+        <div class="value" id="stat-short">-</div>
+      </div>
+      <div class="card">
+        <div class="label">平均 Funding</div>
+        <div class="value" id="stat-funding">-</div>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <div id="status" class="status">加载中...</div>
+      <table id="table" style="display:none;">
+        <thead>
+          <tr>
+            <th>合约</th>
+            <th>价格</th>
+            <th>市值</th>
+            <th>Vol/Mcap</th>
+            <th>OI/Mcap</th>
+            <th>Funding</th>
+            <th>24h涨跌</th>
+            <th>评分</th>
+            <th>标签</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    function colorClass(v) {
+      if (v === null || v === undefined || isNaN(v)) return 'gray';
+      if (v > 0) return 'green';
+      if (v < 0) return 'red';
+      return 'gray';
+    }
+
+    function fmtNum(n, d=2) {
+      if (n === null || n === undefined || isNaN(n)) return '-';
+      if (Math.abs(n) >= 1e9) return (n/1e9).toFixed(2) + 'B';
+      if (Math.abs(n) >= 1e6) return (n/1e6).toFixed(2) + 'M';
+      if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(2) + 'K';
+      return Number(n).toFixed(d);
+    }
+
+    async function getJSON(url) {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+      } catch (e) {
+        console.error(`Failed to fetch ${url}:`, e);
+        return null;
+      }
+    }
+
+    async function loadData() {
+      const status = document.getElementById('status');
+      const table = document.getElementById('table');
+      const tbody = document.getElementById('tbody');
+
+      status.style.display = 'block';
+      status.innerText = '加载中...';
+      table.style.display = 'none';
+      tbody.innerHTML = '';
+
+      try {
+        // 并行加载所有数据
+        const [exchangeInfo, ticker24h, premiumIndex, gecko] = await Promise.all([
+          getJSON('https://fapi.binance.com/fapi/v1/exchangeInfo'),
+          getJSON('https://fapi.binance.com/fapi/v1/ticker/24hr'),
+          getJSON('https://fapi.binance.com/fapi/v1/premiumIndex'),
+          getJSON('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1')
+        ]);
+
+        if (!exchangeInfo || !ticker24h || !premiumIndex) {
+          throw new Error('币安 API 数据获取失败');
+        }
+
+        const symbols = exchangeInfo.symbols
+          .filter(s => s.contractType === 'PERPETUAL' && s.quoteAsset === 'USDT' && s.status === 'TRADING')
+          .map(s => s.symbol)
+          .slice(0, 150);
+
+        const tickerMap = Object.fromEntries(ticker24h.map(x => [x.symbol, x]));
+        const premiumMap = Object.fromEntries(premiumIndex.map(x => [x.symbol, x]));
+        
+        const mcapMap = {};
+        if (gecko) {
+          gecko.forEach(x => {
+            mcapMap[(x.symbol || '').toUpperCase() + 'USDT'] = x.market_cap;
+          });
+        }
+
+        let rows = [];
+
+        for (const symbol of symbols) {
+          try {
+            const t = tickerMap[symbol] || {};
+            const p = premiumMap[symbol] || {};
+
+            const price = parseFloat(p.markPrice || t.lastPrice || 0);
+            if (!price) continue;
+
+            const quoteVol = parseFloat(t.quoteVolume || 0);
+            const funding = parseFloat(p.lastFundingRate || 0) * 100;
+            const priceChange = parseFloat(t.priceChangePercent || 0);
+
+            const mcap = mcapMap[symbol] || null;
+            let oi = 0;
+            let oiValue = 0;
+            let volMcap = null;
+            let oiMcap = null;
+
+            if (t.openInterest) {
+              oi = parseFloat(t.openInterest || 0);
+              oiValue = oi * price;
+            }
+
+            if (mcap && mcap > 0) {
+              volMcap = quoteVol / mcap * 100;
+              oiMcap = oiValue / mcap * 100;
+            }
+
+            let score = 50;
+            if (volMcap) score += Math.min(volMcap / 3, 20);
+            if (oiMcap) score += Math.min(oiMcap / 3, 20);
+            score += Math.min(Math.abs(funding) * 100, 10);
+            score = Math.min(score, 100);
+
+            const tags = [];
+            if (volMcap && volMcap > 20) tags.push('放量');
+            if (oiMcap && oiMcap > 10) tags.push('杠杆集中');
+            if (funding > 0.04) tags.push('多头拥挤');
+            if (funding < -0.04) tags.push('空头拥挤');
+
+            rows.push({
+              symbol, 
+              price, 
+              mcap, 
+              volMcap, 
+              oiMcap, 
+              funding, 
+              priceChange, 
+              score, 
+              tags
+            });
+          } catch (e) {
+            console.error(`Error processing ${symbol}:`, e);
+            continue;
+          }
+        }
+
+        if (rows.length === 0) {
+          throw new Error('没有获取到数据');
+        }
+
+        rows.sort((a, b) => b.score - a.score);
+
+        // 更新统计
+        document.getElementById('stat-total').innerText = rows.length;
+        document.getElementById('stat-vol').innerText = rows.filter(x => x.volMcap && x.volMcap > 20).length;
+        document.getElementById('stat-long').innerText = rows.filter(x => x.funding > 0.04).length;
+        document.getElementById('stat-short').innerText = rows.filter(x => x.funding < -0.04).length;
+        
+        const avgFunding = rows.length ? rows.reduce((s, x) => s + x.funding, 0) / rows.length : 0;
+        document.getElementById('stat-funding').innerText = avgFunding.toFixed(4) + '%';
+
+        // 填充表格（前 80 行）
+        rows.slice(0, 80).forEach(row => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td class="symbol">${row.symbol}</td>
+            <td>$${fmtNum(row.price, 6)}</td>
+            <td>$${fmtNum(row.mcap, 2)}</td>
+            <td class="${colorClass(row.volMcap)}">${row.volMcap ? row.volMcap.toFixed(2) + '%' : '-'}</td>
+            <td class="${colorClass(row.oiMcap)}">${row.oiMcap ? row.oiMcap.toFixed(2) + '%' : '-'}</td>
+            <td class="${colorClass(row.funding)}">${row.funding.toFixed(4)}%</td>
+            <td class="${colorClass(row.priceChange)}">${row.priceChange.toFixed(2)}%</td>
+            <td style="color:#06b6d4;font-weight:bold;">${row.score.toFixed(1)}</td>
+            <td>${row.tags.map(t => `<span class="tag">${t}</span>`).join('')}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        status.style.display = 'none';
+        table.style.display = 'table';
+        document.getElementById('last-update').innerText = '最后更新：' + new Date().toLocaleTimeString();
+
+      } catch (e) {
+        status.style.display = 'block';
+        status.innerText = '加载失败：' + e.message;
+        status.classList.add('error');
+        table.style.display = 'none';
+        console.error('Error:', e);
+      }
+    }
+
+    // 初始加载
+    loadData();
+
+    // 每 60 秒自动刷新
+    setInterval(loadData, 60000);
+  </script>
+</body>
+</html>
